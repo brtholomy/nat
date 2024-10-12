@@ -1,4 +1,6 @@
-# eKGWB
+# nat : nietzsche archive transpiler
+
+Or, making the eKGWB greppable.
 
 To get the full KGW in Markdown, with emphasis. The HKA I have is plaintext with no emphasis markers.
 
@@ -6,7 +8,7 @@ To get the full KGW in Markdown, with emphasis. The HKA I have is plaintext with
 
 Problem is the numbering.
 
-the eKGWB uses some bullshit NF-YEAR,00[0] numbering. Which doesn't directly match any of the schemes in the HKA.
+the eKGWB uses some bullshit NF-YEAR,00[0] numbering. Which doesn't directly match any of the schemes in the HKA nor the KGW.
 
 so this:
 
