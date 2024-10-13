@@ -111,10 +111,12 @@ func RunPandoc(content string) string {
 func CleanupHtml(content []byte) []byte {
 	crapdiv, _ := regexp.Compile(`(?s)<div class="tooltip" style="position: absolute;.*?</span>`)
 	content = crapdiv.ReplaceAll(content, []byte("</span>"))
+	content = bytes.ReplaceAll(content, []byte("&lt;"), []byte(""))
+	content = bytes.ReplaceAll(content, []byte("&gt;"), []byte(""))
 	return content
 }
 
-func Cleanup(content string) (out string) {
+func CleanupMd(content string) (out string) {
 	out = strings.ReplaceAll(content, `\`, "")
 	out = strings.ReplaceAll(out, `#eKGWB`, "eKGWB")
 	return out
@@ -197,7 +199,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	// TODO: remove &lt; &gt; from html
 	dat = CleanupHtml(dat)
 	r := bytes.NewReader(dat)
 	doc, err := html.Parse(r)
@@ -206,7 +207,7 @@ func main() {
 	}
 	out := ProcessNode(doc)
 	md := RunPandoc(out)
-	md = Cleanup(md)
+	md = CleanupMd(md)
 
 	books := MapHKA()
 	md = AnnotateKGW(md, books)
