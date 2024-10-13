@@ -48,3 +48,42 @@
 	// 			}
 	// 		}
 	// 	}
+
+
+func AnnotateKGW(markdown string, books map[string][]string) string {
+	// # [15 = W II 6a. Frühjahr 1888]
+	book_rx, _ := regexp.Compile(`(?m)^# \[(.+)\]$`)
+	// ## eKGWB/NF-1888,15[1]
+	aphorism_rx, _ := regexp.Compile(`(?m)^## eKGWB/.*,(.*)$`)
+	res := book_rx.FindStringSubmatch(markdown)
+	if res == nil {
+		panic("nope")
+		return markdown
+	}
+
+	aphs, ok := books[res[1]]
+	if !ok {
+		panic("nope")
+		return markdown
+	}
+
+	out := ""
+	h2s := aphorism_rx.FindAllStringIndex(markdown, -1)
+	for i, h2 := range h2s {
+		fmt.Println(h2)
+		header := markdown[h2[0]:h2[1]]
+		_, header, ok := strings.Cut(header, ",")
+		if !ok {
+			panic("nope")
+			return markdown
+		}
+		fmt.Println(header)
+		if strings.Contains(aphs[i], header) {
+			out += markdown[:h2[1]] + aphs[i] + markdown[h2[1]:]
+		} else {
+			panic("nope")
+		}
+	}
+
+	return out
+}

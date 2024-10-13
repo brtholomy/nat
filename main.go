@@ -140,6 +140,68 @@ func MapHKA() map[string][]string {
 	return books
 }
 
+func HKAHeader(ekgw_aph string, book string, books map[string][]string) string {
+	// # [15 = W II 6a. Frühjahr 1888]
+	book = strings.TrimPrefix(book, "[")
+	book = strings.TrimSuffix(book, "]")
+	aphs, ok := books[book]
+	if !ok {
+		return ekgw_aph
+	}
+
+	// #eKGWB/NF-1888,15[1]
+	aphorism_rx, _ := regexp.Compile(`#eKGWB/.*,(.*)`)
+	res := aphorism_rx.FindStringSubmatch(ekgw_aph)
+	if res == nil {
+		return ekgw_aph
+	}
+
+	for _, aph := range aphs {
+		if strings.Contains(aph, res[1]) {
+			return aph
+		}
+	}
+	return ekgw_aph
+}
+
+func AnnotateKGW(markdown string, books map[string][]string) string {
+	// # [15 = W II 6a. Frühjahr 1888]
+	book_rx, _ := regexp.Compile(`(?m)^# \[(.+)\]$`)
+	// ## eKGWB/NF-1888,15[1]
+	aphorism_rx, _ := regexp.Compile(`(?m)^## eKGWB/.*,(.*)$`)
+	res := book_rx.FindStringSubmatch(markdown)
+	if res == nil {
+		panic("nope")
+		return markdown
+	}
+
+	aphs, ok := books[res[1]]
+	if !ok {
+		panic("nope")
+		return markdown
+	}
+
+	out := markdown
+	h2s := aphorism_rx.FindAllStringIndex(markdown, -1)
+	for i, h2 := range h2s {
+		header := markdown[h2[0]:h2[1]]
+		_, header, ok := strings.Cut(header, ",")
+		if !ok {
+			panic("nope")
+			return markdown
+		}
+		if strings.Contains(aphs[i], header) {
+			j := strings.Index(out, header)
+			// TODO: inserts into the middle of the eKGWB header: should seek back to newline?
+			out = out[:j] + aphs[i] + out[j:]
+		} else {
+			panic("nope")
+		}
+	}
+
+	return out
+}
+
 func main() {
 	dat, err := os.ReadFile(SOURCE)
 	if err != nil {
@@ -156,8 +218,8 @@ func main() {
 	md = Cleanup(md)
 
 	books := MapHKA()
-	fmt.Println(books["15 = W II 6a. Frühjahr 1888"])
-	panic("foo")
+	// fmt.Println(books["15 = W II 6a. Frühjahr 1888"])
+	md = AnnotateKGW(md, books)
 
 	fmt.Println(md)
 }
