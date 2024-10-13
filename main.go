@@ -56,6 +56,7 @@ func ProcessNode(n *html.Node) (out string) {
 			// have to catch this from within the p case:
 			if c.DataAtom.String() == "span" {
 				for _, a := range c.Attr {
+					// TODO: must also handle <span style="position:relative"><span class="tooltip_corrige">
 					if a.Key == "class" && a.Val == "bold" {
 						for span := c.FirstChild; span != nil; span = span.NextSibling {
 							if span.Type == html.TextNode {
@@ -140,65 +141,42 @@ func MapHKA() map[string][]string {
 	return books
 }
 
-func HKAHeader(ekgw_aph string, book string, books map[string][]string) string {
-	// # [15 = W II 6a. Frühjahr 1888]
-	book = strings.TrimPrefix(book, "[")
-	book = strings.TrimSuffix(book, "]")
-	aphs, ok := books[book]
-	if !ok {
-		return ekgw_aph
-	}
-
-	// #eKGWB/NF-1888,15[1]
-	aphorism_rx, _ := regexp.Compile(`#eKGWB/.*,(.*)`)
-	res := aphorism_rx.FindStringSubmatch(ekgw_aph)
-	if res == nil {
-		return ekgw_aph
-	}
-
-	for _, aph := range aphs {
-		if strings.Contains(aph, res[1]) {
-			return aph
-		}
-	}
-	return ekgw_aph
-}
-
+// takes the markdown rendered string and replaces the bullshit eKGWB citations with the proper KGW
+// numbers mapped from the HKA.
 func AnnotateKGW(markdown string, books map[string][]string) string {
 	// # [15 = W II 6a. Frühjahr 1888]
 	book_rx, _ := regexp.Compile(`(?m)^# \[(.+)\]$`)
 	// ## eKGWB/NF-1888,15[1]
 	aphorism_rx, _ := regexp.Compile(`(?m)^## eKGWB/.*,(.*)$`)
-	res := book_rx.FindStringSubmatch(markdown)
-	if res == nil {
-		panic("nope")
+	book_match := book_rx.FindStringSubmatch(markdown)
+	if book_match == nil {
 		return markdown
 	}
 
-	aphs, ok := books[res[1]]
+	// get the submatch only:
+	aphs, ok := books[book_match[1]]
 	if !ok {
-		panic("nope")
 		return markdown
 	}
 
 	out := markdown
-	h2s := aphorism_rx.FindAllStringIndex(markdown, -1)
-	for i, h2 := range h2s {
-		header := markdown[h2[0]:h2[1]]
-		_, header, ok := strings.Cut(header, ",")
+	h2s := aphorism_rx.FindAllString(markdown, -1)
+	for i, header := range h2s {
+		_, number, ok := strings.Cut(header, ",")
 		if !ok {
-			panic("nope")
-			return markdown
+			continue
 		}
-		if strings.Contains(aphs[i], header) {
-			j := strings.Index(out, header)
-			// TODO: inserts into the middle of the eKGWB header: should seek back to newline?
-			out = out[:j] + aphs[i] + out[j:]
-		} else {
-			panic("nope")
+		// NOTE: the index here is assumed to match the []string from the map:
+		if strings.Contains(aphs[i], number) {
+			// '## '
+			//  012
+			j := strings.Index(out, header) + 3
+			aph := strings.TrimPrefix(aphs[i], "Aphorism ")
+			// NOTE: j+len(header)-3 : effectively removes the eKGWB header
+			// NOTE: we're not building back the markdown string, but interpolating:
+			out = out[:j] + aph + out[j+len(header)-3:]
 		}
 	}
-
 	return out
 }
 
