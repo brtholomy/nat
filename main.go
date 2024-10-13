@@ -22,7 +22,7 @@ func ProcessNode(n *html.Node) (out string) {
 	// title
 	case "div":
 		for _, a := range n.Attr {
-			if a.Key == "id" && strings.HasSuffix(a.Val, "[Gruppe]") {
+			if a.Key == "id" && (strings.HasSuffix(a.Val, "[Gruppe]") || strings.HasSuffix(a.Val, "[Titel]")) {
 				for c := n.FirstChild; c != nil; c = c.NextSibling {
 					if c.Data == "div" {
 						for c2 := c.FirstChild; c2 != nil; c2 = c2.NextSibling {
@@ -48,15 +48,14 @@ func ProcessNode(n *html.Node) (out string) {
 	case "p":
 		out += fmt.Sprintln("<p>")
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
-
 			if c.Type == html.TextNode {
 				out += fmt.Sprintln(c.Data)
 			}
 
-			// have to catch this from within the p case:
-			if c.DataAtom.String() == "span" {
+			// span : have to catch this from within the p case:
+			if c.Type == html.ElementNode && c.Data == "span" {
 				for _, a := range c.Attr {
-					// TODO: must also handle <span style="position:relative"><span class="tooltip_corrige">
+					// bold : <em>
 					if a.Key == "class" && a.Val == "bold" {
 						for span := c.FirstChild; span != nil; span = span.NextSibling {
 							if span.Type == html.TextNode {
@@ -64,11 +63,19 @@ func ProcessNode(n *html.Node) (out string) {
 							}
 						}
 					}
+
+					// handle <span style="position:relative"><span class="tooltip_corrige">text
+					if a.Key == "style" && a.Val == "position:relative" {
+						for corrige := c.FirstChild; corrige != nil; corrige = corrige.NextSibling {
+							if corrige.Attr != nil && corrige.Attr[0].Val == "tooltip_corrige" && corrige.FirstChild.Type == html.TextNode {
+								out += fmt.Sprintln(corrige.FirstChild.Data)
+							}
+						}
+					}
 				}
 			}
 		}
 		out += fmt.Sprintln("</p>")
-
 	}
 
 	// Traverse child nodes
@@ -79,7 +86,6 @@ func ProcessNode(n *html.Node) (out string) {
 }
 
 func RunPandoc(content string) string {
-	// cmd := exec.Command("pandoc", "--wrap=none", "--from=html", "--to=markdown-smart", "--output=test.md")
 	cmd := exec.Command("pandoc", "--wrap=none", "--from=html", "--to=markdown-smart")
 
 	// https://pkg.go.dev/os/exec#Cmd.StdoutPipe
@@ -100,6 +106,12 @@ func RunPandoc(content string) string {
 		log.Fatal(err)
 	}
 	return string(out)
+}
+
+func CleanupHtml(content []byte) []byte {
+	crapdiv, _ := regexp.Compile(`(?s)<div class="tooltip" style="position: absolute;.*?</span>`)
+	content = crapdiv.ReplaceAll(content, []byte("</span>"))
+	return content
 }
 
 func Cleanup(content string) (out string) {
@@ -185,8 +197,9 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	// TODO: remove &lt; &gt; from html
+	dat = CleanupHtml(dat)
 	r := bytes.NewReader(dat)
-
 	doc, err := html.Parse(r)
 	if err != nil {
 		panic(err)
@@ -196,7 +209,6 @@ func main() {
 	md = Cleanup(md)
 
 	books := MapHKA()
-	// fmt.Println(books["15 = W II 6a. Frühjahr 1888"])
 	md = AnnotateKGW(md, books)
 
 	fmt.Println(md)
