@@ -10,83 +10,105 @@ import (
 	"regexp"
 	"strings"
 
-	"golang.org/x/net/html"
+	"github.com/PuerkitoBio/goquery"
 )
 
-const SOURCE = "sources/mock/NF-1888,15.html"
+const MOCK_SOURCE = "sources/mock/NF-1888,15.html"
+const SOURCE = "sources/html_original/NF-1888,14.html"
 const HKA_SOURCE = "sources/HKA.txt"
 
-func ProcessNode(n *html.Node) (out string) {
-	switch n.Data {
+// we expect later that all stored strings are already html.
+type Entry struct {
+	h2   string
+	html string
+}
 
-	// title
-	case "div":
-		for _, a := range n.Attr {
-			if a.Key == "id" && (strings.HasSuffix(a.Val, "[Gruppe]") || strings.HasSuffix(a.Val, "[Titel]")) {
-				for c := n.FirstChild; c != nil; c = c.NextSibling {
-					if c.Data == "div" {
-						for c2 := c.FirstChild; c2 != nil; c2 = c2.NextSibling {
-							if c2.Data == "p" && c2.FirstChild.Type == html.TextNode {
-								out += fmt.Sprintln("<h1>", c2.FirstChild.Data, "</h1>")
-								// HACK: to prevent it from printing again in the "p" case:
-								c2.FirstChild = nil
-							}
-						}
-					}
-				}
-			}
+// represents a complete eKGW grouping as downloaded from nietzschesource.org
+type eKGWDoc struct {
+	h1      string
+	entries []Entry
+}
+
+func ParseWithGoquery(doc *goquery.Document) eKGWDoc {
+	var ekgw eKGWDoc
+
+	// clean it first
+	doc.Find("div.tooltip").Each(func(i int, s *goquery.Selection) {
+		s.Remove()
+	})
+	doc.Find("a").Each(func(i int, s *goquery.Selection) {
+		s.Remove()
+	})
+	doc.Find("h2").Each(func(i int, s *goquery.Selection) {
+		s.Remove()
+	})
+	doc.Find("span.bold").Each(func(i int, s *goquery.Selection) {
+		s.ReplaceWithHtml("<em>" + s.Text() + "</em>")
+	})
+	doc.Find("span.bolditalic").Each(func(i int, s *goquery.Selection) {
+		s.ReplaceWithHtml("<b>" + s.Text() + "</b>")
+	})
+	// TODO: replace with <ul> ?
+	doc.Find("table").Each(func(i int, s *goquery.Selection) {
+		s.ReplaceWithSelection(s.Find("div.p"))
+	})
+
+	// h1
+	doc.Find("div.titel").Each(func(i int, s *goquery.Selection) {
+		title, err := s.Html()
+		if err != nil {
+			panic(err)
 		}
+		ekgw.h1 = title
+	})
+	p := doc.Find("p.Gruppe").Text()
+	ekgw.h1 = "<h1>" + p + "</h1>"
 
-	// aphorism heading
-	case "a":
-		for _, a := range n.Attr {
-			if a.Key == "data-link" {
-				out += fmt.Sprintln("<h2>", a.Val, "</h2>")
-			}
+	// entries : h2 and html
+	doc.Find("div.txt_block").Each(func(i int, s *goquery.Selection) {
+		var e Entry
+		id, ok := s.Find("div.div1").Attr("id")
+		if !ok || strings.Contains(id, "Gruppe") {
+			return
 		}
+		e.h2 = "<h2>" + id + "</h2>"
 
-	case "p":
-		out += fmt.Sprintln("<p>")
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			if c.Type == html.TextNode {
-				out += fmt.Sprintln(c.Data)
-			}
-
-			// span : have to catch this from within the p case:
-			if c.Type == html.ElementNode && c.Data == "span" {
-				for _, a := range c.Attr {
-					// bold : <em>
-					if a.Key == "class" && a.Val == "bold" {
-						for span := c.FirstChild; span != nil; span = span.NextSibling {
-							if span.Type == html.TextNode {
-								out += fmt.Sprintln("<em>" + span.Data + "</em>")
-							}
-						}
-					}
-
-					// handle <span style="position:relative"><span class="tooltip_corrige">text
-					if a.Key == "style" && a.Val == "position:relative" {
-						for corrige := c.FirstChild; corrige != nil; corrige = corrige.NextSibling {
-							if corrige.Attr != nil && corrige.Attr[0].Val == "tooltip_corrige" && corrige.FirstChild.Type == html.TextNode {
-								out += fmt.Sprintln(corrige.FirstChild.Data)
-							}
-						}
-					}
-				}
-			}
+		inner, err := s.Html()
+		if err != nil {
+			panic(err)
 		}
-		out += fmt.Sprintln("</p>")
-	}
+		e.html = inner
+		ekgw.entries = append(ekgw.entries, e)
+	})
+	return ekgw
+}
 
-	// Traverse child nodes
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		out += ProcessNode(c)
+func Render(ekgw eKGWDoc) (out string) {
+	out += fmt.Sprintln(ekgw.h1)
+	for _, e := range ekgw.entries {
+		out += fmt.Sprintln(e.h2)
+		out += e.html
 	}
 	return out
 }
 
+func PreCleanupHtml(content []byte) []byte {
+	// crapdiv, _ := regexp.Compile(`(?s)<div class="tooltip" style="position: absolute;.*?</span>`)
+	// content = crapdiv.ReplaceAll(content, []byte("</span>"))
+	content = bytes.ReplaceAll(content, []byte("&lt;"), []byte(""))
+	content = bytes.ReplaceAll(content, []byte("&gt;"), []byte(""))
+	return content
+}
+
+func CleanupMd(content string) (out string) {
+	out = strings.ReplaceAll(content, `\`, "")
+	out = strings.ReplaceAll(out, `#eKGWB`, "eKGWB")
+	out = strings.ReplaceAll(out, ` `, " ")
+	return out
+}
+
 func RunPandoc(content string) string {
-	cmd := exec.Command("pandoc", "--wrap=none", "--from=html", "--to=markdown-smart")
+	cmd := exec.Command("pandoc", "--wrap=none", "--from=html-native_divs-native_spans", "--to=markdown-smart")
 
 	// https://pkg.go.dev/os/exec#Cmd.StdoutPipe
 	stdin, err := cmd.StdinPipe()
@@ -106,20 +128,6 @@ func RunPandoc(content string) string {
 		log.Fatal(err)
 	}
 	return string(out)
-}
-
-func CleanupHtml(content []byte) []byte {
-	crapdiv, _ := regexp.Compile(`(?s)<div class="tooltip" style="position: absolute;.*?</span>`)
-	content = crapdiv.ReplaceAll(content, []byte("</span>"))
-	content = bytes.ReplaceAll(content, []byte("&lt;"), []byte(""))
-	content = bytes.ReplaceAll(content, []byte("&gt;"), []byte(""))
-	return content
-}
-
-func CleanupMd(content string) (out string) {
-	out = strings.ReplaceAll(content, `\`, "")
-	out = strings.ReplaceAll(out, `#eKGWB`, "eKGWB")
-	return out
 }
 
 func MapHKA() map[string][]string {
@@ -199,13 +207,16 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	dat = CleanupHtml(dat)
+	dat = PreCleanupHtml(dat)
 	r := bytes.NewReader(dat)
-	doc, err := html.Parse(r)
+
+	doc, err := goquery.NewDocumentFromReader(r)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
-	out := ProcessNode(doc)
+	ekgw := ParseWithGoquery(doc)
+	out := Render(ekgw)
+
 	md := RunPandoc(out)
 	md = CleanupMd(md)
 
