@@ -13,9 +13,9 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
-const MOCK_SOURCE = "sources/mock/NF-1888,15.html"
-const SOURCE = "sources/html_original/NF-1888,14.html"
+const NF_GLOB = "sources/html_original/NF*.html"
 const HKA_SOURCE = "sources/HKA.txt"
+const MOCK_SOURCE = "sources/mock/NF-1888,15.html"
 
 // we expect later that all stored strings are already html.
 type Entry struct {
@@ -39,8 +39,9 @@ func ParseWithGoquery(doc *goquery.Document) eKGWDoc {
 	doc.Find("a").Each(func(i int, s *goquery.Selection) {
 		s.Remove()
 	})
-	doc.Find("h2").Each(func(i int, s *goquery.Selection) {
-		s.Remove()
+	doc.Find("div.head").Each(func(i int, s *goquery.Selection) {
+		// leaving h2 as it appears in the div.titel
+		s.Find("h2").Remove()
 	})
 	doc.Find("span.bold").Each(func(i int, s *goquery.Selection) {
 		s.ReplaceWithHtml("<em>" + s.Text() + "</em>")
@@ -53,16 +54,18 @@ func ParseWithGoquery(doc *goquery.Document) eKGWDoc {
 		s.ReplaceWithSelection(s.Find("div.p"))
 	})
 
-	// h1
-	doc.Find("div.titel").Each(func(i int, s *goquery.Selection) {
-		title, err := s.Html()
-		if err != nil {
-			panic(err)
-		}
-		ekgw.h1 = title
-	})
-	p := doc.Find("p.Gruppe").Text()
-	ekgw.h1 = "<h1>" + p + "</h1>"
+	// h1 : we get the whole block, since it might contain h2s
+	title_html, err := doc.Find("div.titel").Html()
+	if err != nil {
+		panic(err)
+	}
+	// or just get the first p.Gruppe
+	p := doc.Find("p.Gruppe").Last().Text()
+	if title_html != "" {
+		ekgw.h1 = title_html
+	} else {
+		ekgw.h1 = "<h1>" + p + "</h1>"
+	}
 
 	// entries : h2 and html
 	doc.Find("div.txt_block").Each(func(i int, s *goquery.Selection) {
@@ -93,8 +96,6 @@ func Render(ekgw eKGWDoc) (out string) {
 }
 
 func PreCleanupHtml(content []byte) []byte {
-	// crapdiv, _ := regexp.Compile(`(?s)<div class="tooltip" style="position: absolute;.*?</span>`)
-	// content = crapdiv.ReplaceAll(content, []byte("</span>"))
 	content = bytes.ReplaceAll(content, []byte("&lt;"), []byte(""))
 	content = bytes.ReplaceAll(content, []byte("&gt;"), []byte(""))
 	return content
@@ -165,11 +166,7 @@ func MapHKA() map[string][]string {
 
 // takes the markdown rendered string and replaces the bullshit eKGWB citations with the proper KGW
 // numbers mapped from the HKA.
-func AnnotateKGW(markdown string, books map[string][]string) string {
-	// # [15 = W II 6a. Frühjahr 1888]
-	book_rx, _ := regexp.Compile(`(?m)^# \[(.+)\]$`)
-	// ## eKGWB/NF-1888,15[1]
-	aphorism_rx, _ := regexp.Compile(`(?m)^## eKGWB/.*,(.*)$`)
+func AnnotateKGW(markdown string, books map[string][]string, book_rx *regexp.Regexp, aphorism_rx *regexp.Regexp) string {
 	book_match := book_rx.FindStringSubmatch(markdown)
 	if book_match == nil {
 		return markdown
@@ -203,7 +200,7 @@ func AnnotateKGW(markdown string, books map[string][]string) string {
 }
 
 func main() {
-	dat, err := os.ReadFile(SOURCE)
+	dat, err := os.ReadFile(MOCK_SOURCE)
 	if err != nil {
 		panic(err)
 	}
@@ -221,7 +218,11 @@ func main() {
 	md = CleanupMd(md)
 
 	books := MapHKA()
-	md = AnnotateKGW(md, books)
+	// # [15 = W II 6a. Frühjahr 1888]
+	book_rx, _ := regexp.Compile(`(?m)^# \[(.+)\]$`)
+	// ## eKGWB/NF-1888,15[1]
+	aphorism_rx, _ := regexp.Compile(`(?m)^## eKGWB/.*,(.*)$`)
+	md = AnnotateKGW(md, books, book_rx, aphorism_rx)
 
 	fmt.Println(md)
 }
