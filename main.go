@@ -153,7 +153,10 @@ func MapHKA() map[string][]string {
 		// current match
 		book := s[indices[0]:indices[1]]
 		book = strings.TrimPrefix(book, "[ ")
-		book = strings.TrimSuffix(book, " ]")
+		// up to the first period:
+		// [ 31 = Z II 8. Winter 1884 — 85 ]
+		// 31 = Z II 8
+		book, _, _ = strings.Cut(book, ".")
 
 		// slice the whole to look forward for the Aphorism match
 		end := len(s)
@@ -172,13 +175,19 @@ func MapHKA() map[string][]string {
 func AnnotateKGW(markdown string, books map[string][]string, book_rx *regexp.Regexp, aphorism_rx *regexp.Regexp) string {
 	book_match := book_rx.FindStringSubmatch(markdown)
 	if book_match == nil || len(book_match) < 2 {
+		log.Println("didn't find the book within the markdown", markdown[:10])
 		return markdown
 	}
-	book_name := book_match[1]
 
 	// get the submatch only:
-	aphs, ok := books[book_name]
+	book := book_match[1]
+	// HACK: trying to find the shortest possible unique id between HKA and eKGWB. See MapHKA()
+	// TODO: manually fix the outliers. eKGWB differs in about 20 books. Unless I can fuzzy match.
+	// https://github.com/lithammer/fuzzysearch
+	book, _, _ = strings.Cut(book, ".")
+	aphs, ok := books[book]
 	if !ok {
+		log.Println("didn't find the book within the books map", book)
 		return markdown
 	}
 
@@ -187,12 +196,13 @@ func AnnotateKGW(markdown string, books map[string][]string, book_rx *regexp.Reg
 	for i, header := range h2s {
 		_, number, ok := strings.Cut(header, ",")
 		if !ok {
+			log.Println("didn't find the header number the header", header)
 			continue
 		}
 
 		// NOTE: only happening now with NF-1884,28.html since it combines multiple books:
 		if i >= len(aphs) {
-			log.Printf("more eKGW h2 headers: %v found than HKA headers: %v. %v", len(h2s), len(aphs), book_name)
+			log.Printf("more eKGW h2 headers: %v found than HKA headers: %v. %v", len(h2s), len(aphs), book)
 			break
 		}
 		// NOTE: the index here is assumed to match the []string from the map:
@@ -212,11 +222,11 @@ func AnnotateKGW(markdown string, books map[string][]string, book_rx *regexp.Reg
 func ProcessGlob(glob string) {
 	books := MapHKA()
 	// # [15 = W II 6a. Frühjahr 1888]
-	book_rx, _ := regexp.Compile(`(?m)^# \[(.+)\]$`)
+	md_book_rx, _ := regexp.Compile(`(?m)^# \[(.+)\]$`)
 	// ## eKGWB/NF-1888,15[1]
 	// not:
 	// ## eKGWB/NF-1888,15[Titel]
-	aphorism_rx, _ := regexp.Compile(`(?m)^## eKGWB/.*,([\d]+\[[\d]+\])$`)
+	md_aphorism_rx, _ := regexp.Compile(`(?m)^## eKGWB/.*,[0-9]+\[[0-9]+\]$`)
 
 	files, err := filepath.Glob(glob)
 	if err != nil {
@@ -241,7 +251,7 @@ func ProcessGlob(glob string) {
 
 		md := RunPandoc(out)
 		md = CleanupMd(md)
-		md = AnnotateKGW(md, books, book_rx, aphorism_rx)
+		md = AnnotateKGW(md, books, md_book_rx, md_aphorism_rx)
 
 		mdname := "./output/" + strings.TrimSuffix(filepath.Base(f), filepath.Ext(f)) + ".md"
 		f, err := os.Create(mdname)
