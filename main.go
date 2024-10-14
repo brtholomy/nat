@@ -7,13 +7,14 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
 )
 
-const NF_GLOB = "sources/html_original/NF*.html"
+const NF_GLOB = "sources/html_original/NF-*.html"
 const HKA_SOURCE = "sources/HKA.txt"
 const MOCK_SOURCE = "sources/mock/NF-1888,15.html"
 
@@ -105,6 +106,8 @@ func CleanupMd(content string) (out string) {
 	out = strings.ReplaceAll(content, `\`, "")
 	out = strings.ReplaceAll(out, `#eKGWB`, "eKGWB")
 	out = strings.ReplaceAll(out, ` `, " ")
+	// left behind by empty divs and whatnot:
+	out = strings.ReplaceAll(out, "\n\n\n\n", "\n\n")
 	return out
 }
 
@@ -114,7 +117,7 @@ func RunPandoc(content string) string {
 	// https://pkg.go.dev/os/exec#Cmd.StdoutPipe
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	// pipe it in:
@@ -126,7 +129,7 @@ func RunPandoc(content string) string {
 	// get stdout:
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	return string(out)
 }
@@ -168,12 +171,13 @@ func MapHKA() map[string][]string {
 // numbers mapped from the HKA.
 func AnnotateKGW(markdown string, books map[string][]string, book_rx *regexp.Regexp, aphorism_rx *regexp.Regexp) string {
 	book_match := book_rx.FindStringSubmatch(markdown)
-	if book_match == nil {
+	if book_match == nil || len(book_match) < 2 {
 		return markdown
 	}
+	book_name := book_match[1]
 
 	// get the submatch only:
-	aphs, ok := books[book_match[1]]
+	aphs, ok := books[book_name]
 	if !ok {
 		return markdown
 	}
@@ -184,6 +188,12 @@ func AnnotateKGW(markdown string, books map[string][]string, book_rx *regexp.Reg
 		_, number, ok := strings.Cut(header, ",")
 		if !ok {
 			continue
+		}
+
+		// NOTE: only happening now with NF-1884,28.html since it combines multiple books:
+		if i >= len(aphs) {
+			log.Printf("more eKGW h2 headers: %v found than HKA headers: %v. %v", len(h2s), len(aphs), book_name)
+			break
 		}
 		// NOTE: the index here is assumed to match the []string from the map:
 		if strings.Contains(aphs[i], number) {
@@ -199,30 +209,54 @@ func AnnotateKGW(markdown string, books map[string][]string, book_rx *regexp.Reg
 	return out
 }
 
-func main() {
-	dat, err := os.ReadFile(MOCK_SOURCE)
-	if err != nil {
-		panic(err)
-	}
-	dat = PreCleanupHtml(dat)
-	r := bytes.NewReader(dat)
-
-	doc, err := goquery.NewDocumentFromReader(r)
-	if err != nil {
-		log.Fatal(err)
-	}
-	ekgw := ParseWithGoquery(doc)
-	out := Render(ekgw)
-
-	md := RunPandoc(out)
-	md = CleanupMd(md)
-
+func ProcessGlob(glob string) {
 	books := MapHKA()
 	// # [15 = W II 6a. Frühjahr 1888]
 	book_rx, _ := regexp.Compile(`(?m)^# \[(.+)\]$`)
 	// ## eKGWB/NF-1888,15[1]
-	aphorism_rx, _ := regexp.Compile(`(?m)^## eKGWB/.*,(.*)$`)
-	md = AnnotateKGW(md, books, book_rx, aphorism_rx)
+	// not:
+	// ## eKGWB/NF-1888,15[Titel]
+	aphorism_rx, _ := regexp.Compile(`(?m)^## eKGWB/.*,([\d]+\[[\d]+\])$`)
 
-	fmt.Println(md)
+	files, err := filepath.Glob(glob)
+	if err != nil {
+		panic(err)
+	}
+	for _, f := range files {
+		dat, err := os.ReadFile(f)
+		if err != nil {
+			panic(err)
+		}
+
+		log.Println("processing", f)
+		dat = PreCleanupHtml(dat)
+		r := bytes.NewReader(dat)
+
+		doc, err := goquery.NewDocumentFromReader(r)
+		if err != nil {
+			panic(err)
+		}
+		ekgw := ParseWithGoquery(doc)
+		out := Render(ekgw)
+
+		md := RunPandoc(out)
+		md = CleanupMd(md)
+		md = AnnotateKGW(md, books, book_rx, aphorism_rx)
+
+		mdname := "./output/" + strings.TrimSuffix(filepath.Base(f), filepath.Ext(f)) + ".md"
+		f, err := os.Create(mdname)
+		if err != nil {
+			panic(err)
+		}
+		defer f.Close()
+		_, err = f.WriteString(md)
+		if err != nil {
+			panic(err)
+		}
+		log.Println("wrote", mdname)
+	}
+}
+
+func main() {
+	ProcessGlob(NF_GLOB)
 }
