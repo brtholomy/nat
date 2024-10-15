@@ -157,6 +157,8 @@ func MapHKA() map[string][]string {
 		// [ 31 = Z II 8. Winter 1884 — 85 ]
 		// 31 = Z II 8
 		book, _, _ = strings.Cut(book, ".")
+		// collapse whitespace:
+		book = strings.ReplaceAll(book, " ", "")
 
 		// slice the whole to look forward for the Aphorism match
 		end := len(s)
@@ -185,6 +187,7 @@ func AnnotateKGW(markdown string, books map[string][]string, book_rx *regexp.Reg
 	// TODO: manually fix the outliers. eKGWB differs in about 20 books. Unless I can fuzzy match.
 	// https://github.com/lithammer/fuzzysearch
 	book, _, _ = strings.Cut(book, ".")
+	book = strings.ReplaceAll(book, " ", "")
 	aphs, ok := books[book]
 	if !ok {
 		log.Println("didn't find the book within the books map", book)
