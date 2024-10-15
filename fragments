@@ -87,3 +87,13 @@ func AnnotateKGW(markdown string, books map[string][]string) string {
 
 	return out
 }
+
+
+func GetYear(book string) string {
+	r, _ := regexp.Compile(`.+ (18\d\d).*`)
+	matches := r.FindStringSubmatch(book)
+	if matches == nil || len(matches) < 2 {
+		return book
+	}
+	return matches[1]
+}

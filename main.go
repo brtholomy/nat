@@ -16,7 +16,7 @@ import (
 
 const NF_GLOB = "sources/html_original/NF-*.html"
 const HKA_SOURCE = "sources/HKA.txt"
-const MOCK_SOURCE = "sources/mock/NF-1888,15.html"
+const MOCK_SOURCE = "sources/mock/NF-1885,39.html"
 
 // we expect later that all stored strings are already html.
 type Entry struct {
@@ -152,13 +152,7 @@ func MapHKA() map[string][]string {
 	for j, indices := range res {
 		// current match
 		book := s[indices[0]:indices[1]]
-		book = strings.TrimPrefix(book, "[ ")
-		// up to the first period:
-		// [ 31 = Z II 8. Winter 1884 — 85 ]
-		// 31 = Z II 8
-		book, _, _ = strings.Cut(book, ".")
-		// collapse whitespace:
-		book = strings.ReplaceAll(book, " ", "")
+		book = TrimBookName(book)
 
 		// slice the whole to look forward for the Aphorism match
 		end := len(s)
@@ -172,25 +166,69 @@ func MapHKA() map[string][]string {
 	return books
 }
 
+// Transforms both the HKA and eKGWB book listings into a minimal string, ignoring:
+// wrapping [], all whitespace, and case. Cuts at first "."
+//
+// so this:
+// [ 31 = Z II 8. Winter 1884 — 85 ]
+// becomes:
+// 31=zii8
+func TrimBookName(book string) string {
+	// 31 = Z II 8. Winter 1884 — 85
+	book = strings.Trim(book, "[] ")
+	// up to the first period:
+	// 31 = Z II 8
+	book, _, _ = strings.Cut(book, ".")
+	// collapse whitespace:
+	book = strings.ReplaceAll(book, " ", "")
+	book = strings.ToLower(book)
+	return book
+}
+
+// Find the unique id mapping the eKGWB to the HKA by progressively shortening the key. See MapHKA()
+//
+// TODO: manually fix the outliers. eKGWB differs in about 20 books. Unless I can fuzzy match.
+// https://github.com/lithammer/fuzzysearch
+func FindAphorisms(books map[string][]string, book string) (aphs []string, found bool) {
+	origbook := book
+	book = TrimBookName(book)
+
+	short_book := book
+	aphs, ok := books[book]
+	for i := 1; !ok && len(short_book) > 2; i++ {
+		short_book = book[:len(book)-i]
+		for key, _ := range books {
+			j := len(key) - i
+			if j < 2 {
+				continue
+			}
+			short_key := key[:j]
+			if short_book == short_key {
+				aphs, ok = books[key]
+				log.Println("INFO: found book by shortening:", short_key, "original:", origbook)
+				break
+			}
+		}
+	}
+	if !ok {
+		log.Println("WARN: didn't find the book within the books map:", origbook)
+		return nil, false
+	}
+	return aphs, true
+}
+
 // takes the markdown rendered string and replaces the bullshit eKGWB citations with the proper KGW
 // numbers mapped from the HKA.
 func AnnotateKGW(markdown string, books map[string][]string, book_rx *regexp.Regexp, aphorism_rx *regexp.Regexp) string {
 	book_match := book_rx.FindStringSubmatch(markdown)
 	if book_match == nil || len(book_match) < 2 {
-		log.Println("didn't find the book within the markdown", markdown[:10])
+		log.Println("WARN: didn't find the book within the markdown", markdown[:10])
 		return markdown
 	}
-
 	// get the submatch only:
 	book := book_match[1]
-	// HACK: trying to find the shortest possible unique id between HKA and eKGWB. See MapHKA()
-	// TODO: manually fix the outliers. eKGWB differs in about 20 books. Unless I can fuzzy match.
-	// https://github.com/lithammer/fuzzysearch
-	book, _, _ = strings.Cut(book, ".")
-	book = strings.ReplaceAll(book, " ", "")
-	aphs, ok := books[book]
+	aphs, ok := FindAphorisms(books, book)
 	if !ok {
-		log.Println("didn't find the book within the books map", book)
 		return markdown
 	}
 
@@ -199,13 +237,13 @@ func AnnotateKGW(markdown string, books map[string][]string, book_rx *regexp.Reg
 	for i, header := range h2s {
 		_, number, ok := strings.Cut(header, ",")
 		if !ok {
-			log.Println("didn't find the header number the header", header)
+			log.Println("WARN: didn't find the header number in the header", header)
 			continue
 		}
 
-		// NOTE: only happening now with NF-1884,28.html since it combines multiple books:
+		// NOTE: happens when the eKGWB combines multiple books, eg NF-1884,28.html:
 		if i >= len(aphs) {
-			log.Printf("more eKGW h2 headers: %v found than HKA headers: %v. %v", len(h2s), len(aphs), book)
+			log.Printf("WARN: more eKGW h2 headers: %v found than HKA headers: %v. %v", len(h2s), len(aphs), book)
 			break
 		}
 		// NOTE: the index here is assumed to match the []string from the map:
@@ -241,7 +279,7 @@ func ProcessGlob(glob string) {
 			panic(err)
 		}
 
-		log.Println("processing", f)
+		log.Println("INFO: processing", f)
 		dat = PreCleanupHtml(dat)
 		r := bytes.NewReader(dat)
 
@@ -266,10 +304,11 @@ func ProcessGlob(glob string) {
 		if err != nil {
 			panic(err)
 		}
-		log.Println("wrote", mdname)
+		log.Println("INFO: wrote", mdname)
 	}
 }
 
 func main() {
+	log.SetFlags(log.LstdFlags ^ log.Ldate ^ log.Ltime)
 	ProcessGlob(NF_GLOB)
 }
