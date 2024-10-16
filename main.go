@@ -134,6 +134,13 @@ func RunPandoc(content string) string {
 	return string(out)
 }
 
+// Creates a map from a notebook name to a set of aphorism citations.
+//
+// The somwhat odd and arbitrary notebook naming, which might date back to the original Nietzsche
+// archive, is the only reliable link between the HKA and the eKGWB. Here we're trying to create a
+// map from those names to the aphorism citations of the HKA, which are systematic and consistent,
+// so that the eKGWB mappings, which are consistent but incomplete and largely useless, can be
+// replaced.
 func MapHKA() map[string][]string {
 	books := map[string][]string{}
 	// [ 30 = Z II 5, 83. Z II 7b. Z II 6b. Herbst 1884 — Anfang 1885 ]
