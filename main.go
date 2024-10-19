@@ -14,9 +14,13 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
-const NF_GLOB = "sources/html_original/NF-*.html"
 const HKA_SOURCE = "sources/HKA.txt"
-const MOCK_SOURCE = "sources/mock/NF-1885,39.html"
+
+const NF_GLOB = "sources/html/NF-*.html"
+const WERKE_GLOB = "sources/html/W-*.html"
+
+const MOCK_NF = "sources/mock/NF-1885,39.html"
+const MOCK_WERKE = "sources/mock/WA.html"
 
 // we expect later that all stored strings are already html.
 type Entry struct {
@@ -37,9 +41,6 @@ func ParseWithGoquery(doc *goquery.Document) eKGWDoc {
 	doc.Find("div.tooltip").Each(func(i int, s *goquery.Selection) {
 		s.Remove()
 	})
-	doc.Find("a").Each(func(i int, s *goquery.Selection) {
-		s.Remove()
-	})
 	doc.Find("div.head").Each(func(i int, s *goquery.Selection) {
 		// leaving h2 as it appears in the div.titel
 		s.Find("h2").Remove()
@@ -55,12 +56,20 @@ func ParseWithGoquery(doc *goquery.Document) eKGWDoc {
 		s.ReplaceWithSelection(s.Find("div.p"))
 	})
 
-	// h1 : we get the whole block, since it might contain h2s
+	// h1
+	// in the case of published works:
+	title := doc.Find("div.titel")
+	// remove anchors
+	title.Find("a").Each(func(i int, s *goquery.Selection) {
+		s.Remove()
+	})
+	// we get the whole block, since it might contain h2s
 	title_html, err := doc.Find("div.titel").Html()
 	if err != nil {
 		panic(err)
 	}
-	// or just get the first p.Gruppe
+
+	// or the Nachlass:
 	p := doc.Find("p.Gruppe").Last().Text()
 	if title_html != "" {
 		ekgw.h1 = title_html
@@ -71,12 +80,26 @@ func ParseWithGoquery(doc *goquery.Document) eKGWDoc {
 	// entries : h2 and html
 	doc.Find("div.txt_block").Each(func(i int, s *goquery.Selection) {
 		var e Entry
-		id, ok := s.Find("div.div1").Attr("id")
+		// the first anchor seems to be the most reliable place to get the h2:
+		// .Attr() will just get the value from the first element:
+		id, ok := s.Find("a[name]").Attr("name")
 		if !ok || strings.Contains(id, "Gruppe") {
 			return
 		}
 		e.h2 = "<h2>" + id + "</h2>"
 
+		// remove all extraneous stuff now that we have what we want:
+		s.Find("a").Each(func(i int, s *goquery.Selection) {
+			s.Remove()
+		})
+		s.Find("h2").Each(func(i int, s *goquery.Selection) {
+			s.Remove()
+		})
+		s.Find("h3").Each(func(i int, s *goquery.Selection) {
+			s.Remove()
+		})
+
+		// then get the rest:
 		inner, err := s.Html()
 		if err != nil {
 			panic(err)
@@ -267,7 +290,7 @@ func AnnotateKGW(markdown string, books map[string][]string, book_rx *regexp.Reg
 	return out
 }
 
-func ProcessGlob(glob string) {
+func ProcessGlob(glob string, outdir string) {
 	books := MapHKA()
 	// # [15 = W II 6a. Frühjahr 1888]
 	md_book_rx, _ := regexp.Compile(`(?m)^# \[(.+)\]$`)
@@ -301,7 +324,7 @@ func ProcessGlob(glob string) {
 		md = CleanupMd(md)
 		md = AnnotateKGW(md, books, md_book_rx, md_aphorism_rx)
 
-		mdname := "./output/" + strings.TrimSuffix(filepath.Base(f), filepath.Ext(f)) + ".md"
+		mdname := filepath.Join(outdir, strings.TrimSuffix(filepath.Base(f), filepath.Ext(f))+".md")
 		f, err := os.Create(mdname)
 		if err != nil {
 			panic(err)
@@ -317,5 +340,6 @@ func ProcessGlob(glob string) {
 
 func main() {
 	log.SetFlags(log.LstdFlags ^ log.Ldate ^ log.Ltime)
-	ProcessGlob(NF_GLOB)
+	ProcessGlob(NF_GLOB, "./output/")
+	ProcessGlob(WERKE_GLOB, "./output/")
 }
